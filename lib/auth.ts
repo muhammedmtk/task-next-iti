@@ -1,82 +1,28 @@
-"use server";
-
-import { redirect } from "next/navigation";
-import { z } from "zod";
-import bcryptjs from "bcryptjs";
+import { cookies } from "next/headers";
 import { prisma } from "@/lib/prisma";
 
-const signupSchema = z.object({
-  name: z.string().min(2, "Name must be at least 2 characters"),
-  email: z.string().email("Invalid email address"),
-  password: z.string().min(6, "Password must be at least 6 characters"),
-});
+export { login, logout, signup } from "@/lib/auth-actions";
 
-export async function signup(formData: FormData) {
-  const validatedFields = signupSchema.safeParse({
-    name: formData.get("name"),
-    email: formData.get("email"),
-    password: formData.get("password"),
-  });
+export async function getCurrentUser() {
+  const cookieStore = await cookies();
+  const token = cookieStore.get("auth_token")?.value;
 
-  if (!validatedFields.success) {
-    return {
-      success: false,
-      error: validatedFields.error.issues[0]?.message ?? "Validation failed.",
-    };
+  if (!token) {
+    return null;
   }
 
-  const { name, email, password } = validatedFields.data;
+  const userId = Number.parseInt(token, 10);
+  if (Number.isNaN(userId)) {
+    return null;
+  }
 
   try {
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) {
-      return { success: false, error: "An account with this email already exists." };
-    }
-
-    const hashedPassword = await bcryptjs.hash(password, 10);
-    await prisma.user.create({
-      data: { name, email, password: hashedPassword },
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, name: true, email: true },
     });
+    return user;
   } catch {
-    return { success: false, error: "Failed to create account. Please try again." };
+    return null;
   }
-
-  redirect("/login");
-}
-
-const loginSchema = z.object({
-  email: z.string().email("Invalid email address"),
-  password: z.string().min(1, "Password is required"),
-});
-
-export async function login(formData: FormData) {
-  const validatedFields = loginSchema.safeParse({
-    email: formData.get("email"),
-    password: formData.get("password"),
-  });
-
-  if (!validatedFields.success) {
-    return {
-      success: false,
-      error: validatedFields.error.issues[0]?.message ?? "Validation failed.",
-    };
-  }
-
-  const { email, password } = validatedFields.data;
-
-  try {
-    const user = await prisma.user.findUnique({ where: { email } });
-    if (!user) {
-      return { success: false, error: "Invalid email or password." };
-    }
-
-    const isValid = await bcryptjs.compare(password, user.password);
-    if (!isValid) {
-      return { success: false, error: "Invalid email or password." };
-    }
-  } catch {
-    return { success: false, error: "Failed to sign in. Please try again." };
-  }
-
-  redirect("/");
 }
